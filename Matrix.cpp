@@ -3,8 +3,12 @@
 //
 
 #include "Matrix.h"
-#include "Matrix.h"
+#include <algorithm>
+#include <future>
 #include <stdexcept>
+#include <thread>
+
+#define THREADS 16
 
 // Constructors and destructor
 
@@ -116,6 +120,72 @@ bool Matrix::operator==(const Matrix &other) const {
     return true;
 }
 
+bool Matrix::isEqualMultithread(const Matrix &other) const {
+    if (this->getCols() != other.getCols() || this->getRows() != other.getRows()) return false;
+    const size_t num_threads = std::min((size_t) THREADS, rows);
+    const size_t block_size = rows / num_threads;
+
+    std::vector<std::thread> threads;
+    std::mutex mtx;
+    bool result = true;
+
+    for (size_t thread_idx = 0; thread_idx < num_threads; thread_idx++) {
+        const size_t start_row = thread_idx * block_size;
+        const size_t end_row = (thread_idx == num_threads - 1) ? rows : (thread_idx + 1) * block_size;
+
+        threads.emplace_back([this, start_row, end_row, &other, &mtx, &result] {
+            for (size_t row_idx = start_row; row_idx < end_row; row_idx++) {
+                for (size_t col_idx = 0; col_idx < cols; col_idx++) {
+                    if (elements[row_idx][col_idx] != other.elements[row_idx][col_idx]) {
+                        std::lock_guard<std::mutex> lock(mtx);
+                        result = false;
+                        return false;
+                    }
+                }
+            }
+            return true;
+        });
+    }
+
+    for (auto &thread: threads) {
+        thread.join();
+    }
+
+    return result;
+}
+
+bool Matrix::isEqualAsync(const Matrix &other) const {
+    if (this->getCols() != other.getCols() || this->getRows() != other.getRows()) return false;
+    const size_t num_threads = std::min((size_t) THREADS, rows);
+    const size_t block_size = rows / num_threads;
+
+    std::vector<std::future<bool>> futures;
+
+    for (size_t thread_idx = 0; thread_idx < num_threads; thread_idx++) {
+        const size_t start_row = thread_idx * block_size;
+        const size_t end_row = (thread_idx == num_threads - 1) ? rows : (thread_idx + 1) * block_size;
+
+        futures.push_back(std::async(std::launch::async, [this, start_row, end_row, &other] {
+            for (size_t row_idx = start_row; row_idx < end_row; row_idx++) {
+                for (size_t col_idx = 0; col_idx < cols; col_idx++) {
+                    if (elements[row_idx][col_idx] != other.elements[row_idx][col_idx]) {
+                        return false;
+                    }
+                }
+            }
+            return true;
+        }));
+    }
+
+    for (auto &future: futures) {
+        if (!future.get()) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
 bool Matrix::operator!=(const Matrix &other) const {
     return !(*this == other);
 }
@@ -124,8 +194,16 @@ bool Matrix::operator==(const double &k) const {
     return *this == k * Matrix::identity(this->getRows());
 }
 
+bool Matrix::isEqualMultithread(const double &k) const {
+    return this->isEqualMultithread(Matrix::identity(this->getRows()).multiplyMultithread(k));
+}
+
+bool Matrix::isEqualAsync(const double &k) const {
+    return this->isEqualAsync(Matrix::identity(this->getRows()).multiplyAsync(k));
+}
+
 bool Matrix::operator!=(const double &k) const {
-    return !(*this == k)
+    return !(*this == k);
 }
 
 
@@ -143,6 +221,60 @@ Matrix Matrix::operator*(const double &k) const {
             );
         }
     }
+    return result;
+}
+
+Matrix Matrix::multiplyMultithread(const double &k) const {
+    Matrix result(this->getRows(), this->getCols());
+    const size_t num_threads = std::min((size_t) THREADS, rows);
+    const size_t block_size = rows / num_threads;
+
+    std::vector<std::thread> threads;
+
+    for (size_t thread_idx = 0; thread_idx < num_threads; thread_idx++) {
+        const size_t start_row = thread_idx * block_size;
+        const size_t end_row = (thread_idx == num_threads - 1) ? rows : (thread_idx + 1) * block_size;
+
+        threads.emplace_back([this, start_row, end_row, k, &result] {
+            for (size_t row_idx = start_row; row_idx < end_row; row_idx++) {
+                for (size_t col_idx = 0; col_idx < cols; col_idx++) {
+                    result.set(row_idx, col_idx, this->get(row_idx, col_idx) * k);
+                }
+            }
+        });
+    }
+
+    for (auto &thread: threads) {
+        thread.join();
+    }
+
+    return result;
+}
+
+Matrix Matrix::multiplyAsync(const double &k) const {
+    Matrix result(this->getRows(), this->getCols());
+    const size_t num_threads = std::min((size_t) THREADS, rows);
+    const size_t block_size = rows / num_threads;
+
+    std::vector<std::future<void>> futures;
+
+    for (size_t thread_idx = 0; thread_idx < num_threads; thread_idx++) {
+        const size_t start_row = thread_idx * block_size;
+        const size_t end_row = (thread_idx == num_threads - 1) ? rows : (thread_idx + 1) * block_size;
+
+        futures.push_back(std::async(std::launch::async, [this, start_row, end_row, k, &result] {
+            for (size_t row_idx = start_row; row_idx < end_row; row_idx++) {
+                for (size_t col_idx = 0; col_idx < cols; col_idx++) {
+                    result.set(row_idx, col_idx, this->get(row_idx, col_idx) * k);
+                }
+            }
+        }));
+    }
+
+    for (auto &future: futures) {
+        future.get();
+    }
+
     return result;
 }
 
@@ -173,8 +305,70 @@ Matrix Matrix::operator+(const Matrix &other) const {
     return result;
 }
 
+Matrix Matrix::addMultithread(const Matrix &other) const {
+    Matrix result(this->getRows(), this->getCols());
+    const size_t num_threads = std::min((size_t) THREADS, rows);
+    const size_t block_size = rows / num_threads;
+
+    std::vector<std::thread> threads;
+
+    for (size_t thread_idx = 0; thread_idx < num_threads; thread_idx++) {
+        const size_t start_row = thread_idx * block_size;
+        const size_t end_row = (thread_idx == num_threads - 1) ? rows : (thread_idx + 1) * block_size;
+
+        threads.emplace_back([this, start_row, end_row, &other, &result] {
+            for (size_t row_idx = start_row; row_idx < end_row; row_idx++) {
+                for (size_t col_idx = 0; col_idx < cols; col_idx++) {
+                    result.set(row_idx, col_idx, this->get(row_idx, col_idx) + other.get(row_idx, col_idx));
+                }
+            }
+        });
+    }
+
+    for (auto &thread: threads) {
+        thread.join();
+    }
+
+    return result;
+}
+
+Matrix Matrix::addAsync(const Matrix &other) const {
+    Matrix result(this->getRows(), this->getCols());
+    const size_t num_threads = std::min((size_t) THREADS, rows);
+    const size_t block_size = rows / num_threads;
+
+    std::vector<std::future<void>> futures;
+
+    for (size_t thread_idx = 0; thread_idx < num_threads; thread_idx++) {
+        const size_t start_row = thread_idx * block_size;
+        const size_t end_row = (thread_idx == num_threads - 1) ? rows : (thread_idx + 1) * block_size;
+
+        futures.push_back(std::async(std::launch::async, [this, start_row, end_row, &other, &result] {
+            for (size_t row_idx = start_row; row_idx < end_row; row_idx++) {
+                for (size_t col_idx = 0; col_idx < cols; col_idx++) {
+                    result.set(row_idx, col_idx, this->get(row_idx, col_idx) + other.get(row_idx, col_idx));
+                }
+            }
+        }));
+    }
+
+    for (auto &future: futures) {
+        future.get();
+    }
+
+    return result;
+}
+
 Matrix Matrix::operator-(const Matrix &other) const {
     return *this + (-other);
+}
+
+Matrix Matrix::subtractMultithread(const Matrix &other) const {
+    return this->addMultithread(other.multiplyMultithread(-1));
+}
+
+Matrix Matrix::subtractAsync(const Matrix &other) const {
+    return this->addAsync(other.multiplyAsync(-1));
 }
 
 Matrix Matrix::operator*(const Matrix &other) const {
@@ -193,6 +387,66 @@ Matrix Matrix::operator*(const Matrix &other) const {
             result.set(rowIdx, colIdx, valueSum);
         }
     }
+    return result;
+}
+
+Matrix Matrix::multiplyMultithread(const Matrix &other) const {
+    if (this->getCols() != other.getRows())
+        throw std::invalid_argument("Number of columns in first matrix must be equal to number of rows in second");
+
+    Matrix result(this->getRows(), other.getCols());
+
+    std::vector<std::thread> threads;
+    for (size_t row_idx = 0; row_idx < rows; row_idx++) {
+        for (size_t col_idx = 0; col_idx < other.getCols(); col_idx++) {
+            threads.emplace_back([this, &other, &result, row_idx, col_idx] {
+                double valueSum = 0;
+                for (size_t i = 0; i < this->getCols(); i++) {
+                    double thisValue = this->get(row_idx, i);
+                    double otherValue = other.get(i, col_idx);
+                    valueSum += thisValue * otherValue;
+                }
+                result.set(row_idx, col_idx, valueSum);
+            });
+        }
+    }
+
+    for (auto &thread: threads) {
+        thread.join();
+    }
+
+    return result;
+}
+
+Matrix Matrix::multiplyAsync(const Matrix &other) const {
+    if (this->getCols() != other.getRows())
+        throw std::invalid_argument("Number of columns in first matrix must be equal to number of rows in second");
+
+    Matrix result(this->getRows(), other.getCols());
+
+    std::vector<std::future<double>> futures;
+    for (size_t row_idx = 0; row_idx < rows; row_idx++) {
+        for (size_t col_idx = 0; col_idx < other.getCols(); col_idx++) {
+            futures.push_back(std::async(
+                    [this, &other, &result, row_idx, col_idx] {
+                        double valueSum = 0;
+                        for (size_t i = 0; i < this->getCols(); i++) {
+                            double thisValue = this->get(row_idx, i);
+                            double otherValue = other.get(i, col_idx);
+                            valueSum += thisValue * otherValue;
+                        }
+                        return valueSum;
+                    }));
+        }
+    }
+
+    for (size_t row_idx = 0; row_idx < rows; row_idx++) {
+        for (size_t col_idx = 0; col_idx < other.getCols(); col_idx++) {
+            result.set(row_idx, col_idx, futures.at(row_idx * rows + col_idx).get());
+        }
+    }
+
+
     return result;
 }
 

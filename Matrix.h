@@ -56,24 +56,36 @@ public:
 
     // Equality
     bool operator==(const Matrix &other) const;
+    bool isEqualMultithread(const Matrix &other) const;
+    bool isEqualAsync(const Matrix &other) const;
 
     bool operator!=(const Matrix &other) const;
 
     bool operator==(const double &k) const;
+    bool isEqualMultithread(const double &k) const;
+    bool isEqualAsync(const double &k) const;
 
     bool operator!=(const double &k) const;
 
     // Arithmetics
 
     Matrix operator*(const double &k) const;
+    Matrix multiplyMultithread(const double &k) const;
+    Matrix multiplyAsync(const double &k) const;
 
     Matrix operator-() const;
 
     Matrix operator+(const Matrix &other) const;
+    Matrix addMultithread(const Matrix &other) const;
+    Matrix addAsync(const Matrix &other) const;
 
     Matrix operator-(const Matrix &other) const;
+    Matrix subtractMultithread(const Matrix &other) const;
+    Matrix subtractAsync(const Matrix &other) const;
 
     Matrix operator*(const Matrix &other) const;
+    Matrix multiplyMultithread(const Matrix &other) const;
+    Matrix multiplyAsync(const Matrix &other) const;
 
     // Transpose matrix
     Matrix T() const;
