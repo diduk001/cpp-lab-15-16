@@ -9,6 +9,7 @@
 
 // For comparing doubles
 #define EPS 1e-9
+#define THREADS 1024
 
 class Matrix {
 private:

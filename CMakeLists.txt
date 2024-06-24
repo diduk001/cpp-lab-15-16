@@ -3,4 +3,4 @@ project(cpp_lab_15_16)
 
 set(CMAKE_CXX_STANDARD 20)
 
-add_executable(cpp_lab_15_16 main.cpp Matrix.h Matrix.cpp)
+add_executable(cpp_lab_15_16 main.cpp Matrix.h Matrix.cpp Timer.h)
